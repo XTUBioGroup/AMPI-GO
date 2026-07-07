@@ -1,0 +1,2 @@
+# AMPI-GO
+AMPI-GO: InterpretableProteinFunctionPrediction throughAttention-DrivenMulti-ModalFusionfrom ResiduetoNetworkLevels
