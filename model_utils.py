@@ -17,7 +17,7 @@ import pickle as pkl
 import time
 
 from objective import AverageMeter
-from Evaluation_DP import new_compute_performance_deepgoplus
+from Evaluation import new_compute_performance_deepgoplus
 
 class FocalLoss(nn.Module):
     def __init__(self, gamma=2.0, alpha=0.75, reduction='mean'):

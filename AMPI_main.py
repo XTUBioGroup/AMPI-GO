@@ -132,10 +132,10 @@ def train_one_ontology(
         ppi_heads1=4,
         ppi_heads2=4,
         fused_dim=256,
-        use_ppi=False,          # ❌ Disable PPI
-        use_interpro=False, 
+        use_ppi=True,          # ❌ Disable PPI
+        use_interpro=True,
         fusion_type='concat',    # (This parameter has no effect here)
-        use_transformer=False
+        use_transformer=True
     ).to(device)
 
     # 3. Optimizer and loss
