@@ -5,12 +5,12 @@
 # from io import StringIO
 # from tqdm import tqdm
 
-# # ================== 这里改成你的实际路径 ==================
+# # ================== Replace with your actual paths ==================
 
-# # 映射表：第1列 PDB CHAIN ID，第3列 STRING ID
+# # Mapping table: Column 1 is the PDB chain ID; column 3 is the STRING ID
 # MAPPING_FILE = r"pdb_uniprot_string_valid.txt"
 
-# # 输出目录：每个 PDB chain 一个文件，文件名类似 5CED-A.txt
+# # Output directory: One file per PDB chain, with names such as 5CED-A.txt
 # OUTPUT_DIR = r"F:\PythonProject1\ppi_2hop_per_pdb"
 
 # # =======================================================
@@ -18,17 +18,17 @@
 # API_BASE = "https://string-db.org/api/tsv/interaction_partners"
 # HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# # 为了稍微温柔一点，防止打爆 STRING，两个请求之间 sleep 一下
-# SLEEP_SECONDS = 0.01  # 你嫌慢可以改小点，但不建议改成 0
+# # Sleep briefly between requests to avoid overloading STRING
+# SLEEP_SECONDS = 0.01  # Reduce if needed, but setting it to 0 is not recommended
 
 
 # def load_pdb_string_mapping(mapping_file):
 #     """
-#     读取 pdb_uniprot_string_valid.txt
-#     假设格式为：PDBCHAIN  UniProt  STRINGID
-#     例如：
+#     Read pdb_uniprot_string_valid.txt.
+#     Expected format: PDBCHAIN  UniProt  STRINGID
+#     Example:
 #       5CED-A  Q6MHT0  264462.Bd3459
-#     返回：list[(pdb_chain_id, string_id)]
+#     Returns: list[(pdb_chain_id, string_id)]
 #     """
 #     mapping = []
 #     with open(mapping_file, "r") as f:
@@ -42,16 +42,16 @@
 #             pdb_chain_id = parts[0]
 #             string_id = parts[2]
 #             mapping.append((pdb_chain_id, string_id))
-#     print(f"从映射表中读取到 {len(mapping)} 条 PDB-STRING 映射")
+#     print(f"Read {len(mapping)} PDB-STRING mappings from the mapping table")
 #     return mapping
 
 
 # def fetch_interaction_partners(string_id):
 #     """
-#     使用 /api/tsv/interaction_partners 获取一个 STRING ID 的所有 partners。
-#     返回 list[(a, b, score)]，其中 a=stringId_A, b=stringId_B。
+#     Use /api/tsv/interaction_partners to retrieve all partners for a STRING ID.
+#     Returns list[(a, b, score)], where a=stringId_A and b=stringId_B.
 #     """
-#     # 从 STRING ID 中解析物种 ID，例如 9606.ENSPXXX -> 9606
+#     # Parse the species ID from the STRING ID, for example 9606.ENSPXXX -> 9606
 #     species = None
 #     if "." in string_id:
 #         prefix = string_id.split(".")[0]
@@ -60,9 +60,9 @@
 
 #     params = {
 #         "identifiers": string_id,
-#         # 如需要可以加过滤，如：
+#         # Add filters if needed, for example:
 #         # "required_score": 400,
-#         # "limit": 0,  # 部分版本中 0 表示不限制；具体看 STRING 文档
+#         # "limit": 0,  # In some versions, 0 means unlimited; see the STRING documentation
 #     }
 #     if species is not None:
 #         params["species"] = species
@@ -71,7 +71,7 @@
 #         resp = requests.get(API_BASE, params=params, headers=HEADERS, timeout=60)
 #         resp.raise_for_status()
 #     except Exception as e:
-#         print(f"[ERROR] interaction_partners 请求失败: STRING={string_id}, error={e}")
+#         print(f"[ERROR] interaction_partners request failed: STRING={string_id}, error={e}")
 #         return []
 
 #     text = resp.text.strip()
@@ -81,12 +81,12 @@
 #     try:
 #         df = pd.read_csv(StringIO(text), sep="\t")
 #     except Exception as e:
-#         print(f"[ERROR] 解析 TSV 失败 STRING={string_id}, error={e}")
+#         print(f"[ERROR] Failed to parse TSV for STRING={string_id}, error={e}")
 #         return []
 
 #     required_cols = ["stringId_A", "stringId_B", "score"]
 #     if not all(col in df.columns for col in required_cols):
-#         print(f"[WARN] STRING={string_id} 返回的列不包含 {required_cols}")
+#         print(f"[WARN] Columns returned for STRING={string_id} do not include {required_cols}")
 #         return []
 
 #     edges = []
@@ -101,34 +101,34 @@
 
 # def build_2hop_for_one_pdb(pdb_chain_id, string_id):
 #     """
-#     为某一个 PDB chain 构建以 string_id 为中心的 2-hop 局部 PPI 网络：
-#       1. 第一轮：center -> 1-hop 邻居
-#       2. 第二轮：对所有 1-hop 邻居再扩一圈
-#     返回：DataFrame(columns=['protein1','protein2','score'])
+#     Build a 2-hop local PPI network centered on string_id for one PDB chain:
+#       1. First pass: center -> 1-hop neighbors
+#       2. Second pass: Expand all 1-hop neighbors by one more hop
+#     Returns: DataFrame(columns=['protein1','protein2','score'])
 #     """
-#     all_edges = set()   # 存无向边 (u, v, score)
-#     neighbors = set()   # 第一轮得到的一跳邻居
+#     all_edges = set()   # Store undirected edges (u, v, score)
+#     neighbors = set()   # 1-hop neighbors from the first pass
 
-#     # ---------- 第一轮：中心点的 1-hop ----------
+#     # ---------- First pass: 1-hop neighbors of the center ----------
 #     edges1 = fetch_interaction_partners(string_id)
 #     time.sleep(SLEEP_SECONDS)
 
 #     for a, b, s in edges1:
-#         # 无向去重：sort 之后存
+#         # Deduplicate undirected edges by sorting before storing
 #         u, v = sorted([a, b])
 #         all_edges.add((u, v, s))
 
-#         # 这个中心点的 “一跳邻居” 是与 string_id 相连的另一个节点
+#         # A 1-hop neighbor is the other node connected to string_id
 #         if a == string_id:
 #             neighbors.add(b)
 #         elif b == string_id:
 #             neighbors.add(a)
 #         else:
-#             # 理论上 API 中 stringId_A 一般是输入的 ID，但为了保险，这里也可以都算邻居
+#             # The API normally returns the input ID as stringId_A, but count both sides as neighbors for safety
 #             neighbors.add(a)
 #             neighbors.add(b)
 
-#     # ---------- 第二轮：对所有一跳邻居再扩 ----------
+#     # ---------- Second pass: Expand all 1-hop neighbors ----------
 #     for nei in neighbors:
 #         edges2 = fetch_interaction_partners(nei)
 #         time.sleep(SLEEP_SECONDS)
@@ -136,7 +136,7 @@
 #             u, v = sorted([a, b])
 #             all_edges.add((u, v, s))
 
-#     # 转成 DataFrame，列名按你之前习惯：protein1 protein2 score
+#     # Convert to a DataFrame with the usual columns: protein1 protein2 score
 #     if not all_edges:
 #         return pd.DataFrame(columns=["protein1", "protein2", "score"])
 
@@ -150,19 +150,19 @@
 
 #     mapping = load_pdb_string_mapping(MAPPING_FILE)
 
-#     for pdb_chain_id, string_id in tqdm(mapping, desc="构建每个 PDB 的 2-hop PPI"):
+#     for pdb_chain_id, string_id in tqdm(mapping, desc="Building 2-hop PPI for each PDB"):
 #         out_path = os.path.join(OUTPUT_DIR, f"{pdb_chain_id}.txt")
 
-#         # 如果你想跳过已存在的结果，可以加一个判断：
+#         # Add a check here to skip existing results if desired:
 #         if os.path.exists(out_path):
 #          continue
 
-#         print(f"\n[INFO] 处理 PDB={pdb_chain_id}, STRING={string_id}")
+#         print(f"\n[INFO] Processing PDB={pdb_chain_id}, STRING={string_id}")
 #         df = build_2hop_for_one_pdb(pdb_chain_id, string_id)
 
-#         # 保存为 tab 分隔
+#         # Save as tab-delimited data
 #         df.to_csv(out_path, sep="\t", index=False)
-#         print(f"[INFO] 保存 {pdb_chain_id} 的 2-hop PPI 到 {out_path}，边数={len(df)}")
+#         print(f"[INFO] Saved 2-hop PPI for {pdb_chain_id} to {out_path}; edges={len(df)}")
 
 
 # if __name__ == "__main__":
@@ -173,32 +173,32 @@
 # import pandas as pd
 # from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# # ====================== 配置区 ======================
+# # ====================== Configuration ======================
 
-# # 输入文件：之前生成的缺失记录文件 (格式: PDB_CHAIN  STRING_ID  TAXID)
+# # Input: Previously generated missing-record file (format: PDB_CHAIN  STRING_ID  TAXID)
 # SPECIES_FILE = "missing_species_files.txt"   
 
 # OUTPUT_DIR = "string_species_links_v12"
 # BASE_URL = "https://stringdb-downloads.org/download/protein.links.v12.0"
 
-# MAX_WORKERS = 6    # 并发数
-# TIMEOUT = 120       # 单个文件超时时间（秒）
-# MAX_RETRIES = 3     # 失败重试次数
+# MAX_WORKERS = 6    # Number of workers
+# TIMEOUT = 120       # Per-file timeout in seconds
+# MAX_RETRIES = 3     # Number of retries after failure
 
-# FAILED_LOG = "failed_taxids_retry.txt"    # 失败记录文件
+# FAILED_LOG = "failed_taxids_retry.txt"    # Failure log
 
 # # ===================================================
 
 
 # def load_taxids_from_third_column(species_file):
 #     """
-#     读取 missing_species_files.txt 的第三列 (TAXID)
-#     并去重，只保留唯一的 taxid 用于下载
+#     Read the third column (TAXID) from missing_species_files.txt,
+#     deduplicate it, and retain only unique taxids for download.
 #     """
 #     taxids = set()
 #     try:
 #         with open(species_file, "r") as f:
-#             header = next(f, None) # 跳过标题行 (PDB_CHAIN STRING_ID TAXID)
+#             header = next(f, None) # Skip the header row (PDB_CHAIN STRING_ID TAXID)
             
 #             for line in f:
 #                 line = line.strip()
@@ -206,15 +206,15 @@
 #                     continue
 #                 parts = line.split("\t")
 #                 if len(parts) >= 3:
-#                     # 获取第三列，并去除可能存在的 .0 后缀 (例如 9606.0 -> 9606)
+#                     # Get the third column and remove a possible .0 suffix (for example, 9606.0 -> 9606)
 #                     taxid = parts[2].split(".")[0] 
 #                     taxids.add(taxid)
                     
-#         print(f"✅ 从文件读取并去重后，共需下载 {len(taxids)} 个物种文件")
+#         print(f"✅ After reading and deduplication, {len(taxids)} species files must be downloaded")
 #         return list(taxids)
         
 #     except FileNotFoundError:
-#         print(f"❌ 找不到文件: {species_file}")
+#         print(f"❌ File not found: {species_file}")
 #         return []
 
 
@@ -223,42 +223,42 @@
 #     out_path = os.path.join(OUTPUT_DIR, f"{taxid}.protein.links.v12.0.txt.gz")
 #     temp_path = out_path + ".tmp"
 
-#     # ✅ 1. 检查已存在文件
+#     # ✅ 1. Check existing files
 #     if os.path.exists(out_path):
-#         # 简单检查：如果文件大小 > 1KB 认为有效，跳过 (STRING文件通常都很大)
+#         # Simple check: Treat files larger than 1 KB as valid and skip them (STRING files are usually large)
 #         if os.path.getsize(out_path) > 1024:
 #             return ("SKIP", taxid, "file exists")
 #         else:
-#             # 如果是空文件或极小，可能是上次下载失败残留，删除重下
+#             # Empty or tiny files may be remnants of a failed download; delete and download again
 #             try:
 #                 os.remove(out_path)
 #             except:
 #                 pass
 
-#     # ✅ 2. 尝试下载 (带重试机制)
+#     # ✅ 2. Attempt download with retries
 #     for attempt in range(MAX_RETRIES):
 #         try:
 #             with requests.get(url, stream=True, timeout=TIMEOUT) as r:
 #                 if r.status_code == 404:
-#                     return ("FAIL", taxid, "HTTP 404 Not Found (TaxID可能错误)")
+#                     return ("FAIL", taxid, "HTTP 404 Not Found (TaxID may be invalid)")
 #                 if r.status_code != 200:
 #                     raise Exception(f"HTTP {r.status_code}")
 
-#                 # 写入临时文件，防止中断导致文件损坏
+#                 # Write to a temporary file to prevent corruption on interruption
 #                 with open(temp_path, "wb") as f:
 #                     for chunk in r.iter_content(chunk_size=1024 * 1024):
 #                         if chunk:
 #                             f.write(chunk)
             
-#             # 下载完成，重命名
+#             # Rename after the download completes
 #             os.replace(temp_path, out_path)
 #             return ("OK", taxid, "downloaded")
 
 #         except Exception as e:
 #             if attempt < MAX_RETRIES - 1:
-#                 continue # 重试
+#                 continue # Retry
 #             else:
-#                 # 删除可能残留的临时文件
+#                 # Delete any remaining temporary file
 #                 if os.path.exists(temp_path):
 #                     try:
 #                         os.remove(temp_path)
@@ -272,16 +272,16 @@
 # def main():
 #     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-#     # 读取 TAXID
+#     # Read TAXIDs
 #     taxids = load_taxids_from_third_column(SPECIES_FILE)
     
 #     if not taxids:
-#         print("没有需要下载的任务。")
+#         print("No download tasks are required.")
 #         return
 
 #     failed = []
 
-#     print(f"🚀 开始并发下载 (Workers={MAX_WORKERS})...")
+#     print(f"🚀 Starting concurrent downloads (Workers={MAX_WORKERS})...")
 
 #     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
 #         futures = {executor.submit(download_one, taxid): taxid for taxid in taxids}
@@ -297,15 +297,15 @@
 #                 print(f"[FAIL] {taxid} -> {msg}")
 #                 failed.append(taxid)
 
-#     # 写入失败日志
+#     # Write the failure log
 #     if failed:
 #         with open(FAILED_LOG, "w") as f:
 #             for t in failed:
 #                 f.write(f"{t}\n")
-#         print(f"\n⚠️ 共有 {len(failed)} 个文件下载失败，已记录到: {FAILED_LOG}")
-#         print("建议：检查网络连接后，再次运行此脚本即可重试下载。")
+#         print(f"\n⚠️ {len(failed)} files failed to download and were recorded in: {FAILED_LOG}")
+#         print("Recommendation: Check the network connection and rerun this script to retry.")
 #     else:
-#         print("\n✅ 所有需要的物种文件均已就绪！")
+#         print("\n✅ All required species files are ready!")
 
 
 # if __name__ == "__main__":
@@ -321,29 +321,29 @@ import pandas as pd
 from tqdm import tqdm
 from collections import defaultdict
 
-# ===================== 配置 =====================
+# ===================== Configuration =====================
 
-SPECIES_DIR = r"string_species_links_v12"     # 每个物种的 PPI 文件所在目录
+SPECIES_DIR = r"string_species_links_v12"     # Directory containing per-species PPI files
 MAPPING_FILE = r"pdb_uniprot_string_supplement.txt"
 OUTPUT_DIR = r"ppi_from_species_2hop_valid_100_10_supplement" 
 
 MISSING_LOG = "missing_species_files.txt"
 
-# ✅ 核心配置：双层不同的 Top-K
-TOP_K_1HOP = 100  # 第一跳：每个 Seed 取 100 个最强邻居
-TOP_K_2HOP = 10   # 第二跳：每个邻居取 10 个最强邻居
+# ✅ Core configuration: Different Top-K values for two levels
+TOP_K_1HOP = 100  # First hop: Select the 100 strongest neighbors per seed
+TOP_K_2HOP = 10   # Second hop: Select the 10 strongest neighbors per neighbor
 
 # ===============================================
 
 
 def load_mapping_grouped_by_taxid(mapping_file):
     """
-    读取 PDB-STRING 映射表，按 TaxID 分组
+    Read the PDB-STRING mapping table and group records by TaxID.
     """
     taxid_to_string_to_pdbs = defaultdict(lambda: defaultdict(list))
     records_all = []
 
-    print(f"📖 正在加载映射文件: {mapping_file} ...")
+    print(f"📖 Loading mapping file: {mapping_file} ...")
     with open(mapping_file, "r") as f:
         for line in f:
             line = line.strip()
@@ -364,52 +364,52 @@ def load_mapping_grouped_by_taxid(mapping_file):
             taxid_to_string_to_pdbs[taxid][string_id].append(pdb_chain)
             records_all.append((pdb_chain, string_id, taxid))
 
-    print(f"✅ 映射总条数: {len(records_all)}")
-    print(f"✅ 涉及物种数: {len(taxid_to_string_to_pdbs)}")
+    print(f"✅ Total mappings: {len(records_all)}")
+    print(f"✅ Species involved: {len(taxid_to_string_to_pdbs)}")
     return taxid_to_string_to_pdbs, records_all
 
 
 def build_1hop_2hop_for_species_mixed_k(df, seeds_this_species, k1=100, k2=10):
     """
-    混合 Top-K 构建逻辑：
-    1. 1-hop 使用 k1
-    2. 2-hop 使用 k2
+    Hybrid Top-K construction logic:
+    1. Use k1 for 1-hop neighbors
+    2. Use k2 for 2-hop neighbors
     """
     edges_1hop = defaultdict(list)
     edges_2hop = defaultdict(list)
     valid_neighbors_map = defaultdict(set)
 
     # -------------------------------------------------------
-    # 1. 处理 1-hop (Seed -> Neighbor, Top K1)
+    # 1. Process 1-hop edges (Seed -> Neighbor, Top K1)
     # -------------------------------------------------------
-    # 筛选与 Seed 相关的边
+    # Filter edges related to the seed
     mask1 = df["protein1"].isin(seeds_this_species) | df["protein2"].isin(seeds_this_species)
     df_1hop_all = df[mask1]
 
-    # 双向扩展：确保 Seed 在 protein1 位置，方便分组
+    # Expand bidirectionally so the seed is in protein1, simplifying grouping
     s1 = df_1hop_all[df_1hop_all["protein1"].isin(seeds_this_species)].copy()
     s1.columns = ["seed", "neighbor", "score"]
     
     s2 = df_1hop_all[df_1hop_all["protein2"].isin(seeds_this_species)].copy()
     s2.columns = ["neighbor", "seed", "score"]
-    s2 = s2[["seed", "neighbor", "score"]] # 重排顺序
+    s2 = s2[["seed", "neighbor", "score"]] # Reorder columns
     
     df_1hop_unified = pd.concat([s1, s2], ignore_index=True)
     
-    # 按 seed 分组，取 score 最高的 K1 个
+    # Group by seed and select the K1 highest scores
     df_1hop_topk = (
         df_1hop_unified.sort_values(["seed", "score"], ascending=[True, False])
         .groupby("seed")
         .head(k1)
     )
 
-    # 记录结果
+    # Record results
     for row in df_1hop_topk.itertuples(index=False):
-        # 排除自环（虽然 STRING 一般没有自环，但为了保险）
+        # Exclude self-loops (STRING usually has none, but check for safety)
         if row.seed == row.neighbor: continue
         
         edges_1hop[row.seed].append((row.seed, row.neighbor, row.score))
-        valid_neighbors_map[row.neighbor].add(row.seed) # 记录谁连到了这个邻居
+        valid_neighbors_map[row.neighbor].add(row.seed) # Record which seed connects to this neighbor
 
     all_valid_neighbors = set(valid_neighbors_map.keys())
     
@@ -417,10 +417,10 @@ def build_1hop_2hop_for_species_mixed_k(df, seeds_this_species, k1=100, k2=10):
         return edges_1hop, edges_2hop
 
     # -------------------------------------------------------
-    # 2. 处理 2-hop (Neighbor -> Next_Neighbor, Top K2)
+    # 2. Process 2-hop edges (Neighbor -> Next_Neighbor, Top K2)
     # -------------------------------------------------------
     
-    # 筛选与 1-hop 邻居相关的边
+    # Filter edges related to 1-hop neighbors
     mask2 = df["protein1"].isin(all_valid_neighbors) | df["protein2"].isin(all_valid_neighbors)
     df_2hop_all = df[mask2]
     
@@ -433,26 +433,26 @@ def build_1hop_2hop_for_species_mixed_k(df, seeds_this_species, k1=100, k2=10):
     
     df_2hop_unified = pd.concat([n1, n2], ignore_index=True)
     
-    # 按 Neighbor 分组，取 score 最高的 K2 个
+    # Group by neighbor and select the K2 highest scores
     df_2hop_topk = (
         df_2hop_unified.sort_values(["neighbor", "score"], ascending=[True, False])
         .groupby("neighbor")
         .head(k2)
     )
     
-    # 将 2-hop 边回溯给原始的 Seed
+    # Associate 2-hop edges back with the original seed
     for row in df_2hop_topk.itertuples(index=False):
         neighbor = row.neighbor
         next_neighbor = row.next_neighbor
         
-        # 找到所有连接到这个 neighbor 的原始 seed
+        # Find all original seeds connected to this neighbor
         parent_seeds = valid_neighbors_map.get(neighbor, set())
         
         for seed in parent_seeds:
-            # 防止回溯（A->B->A）
+            # Prevent backtracking (A->B->A)
             if next_neighbor == seed:
                 continue
-            # 这里记录的是 (B, C, score)，归属于 Seed A 的子图
+            # Record (B, C, score) in the subgraph belonging to seed A
             edges_2hop[seed].append((neighbor, next_neighbor, row.score))
 
     return edges_1hop, edges_2hop
@@ -460,19 +460,19 @@ def build_1hop_2hop_for_species_mixed_k(df, seeds_this_species, k1=100, k2=10):
 
 def write_pdb_files_with_resume(edges_1hop, edges_2hop, string_to_pdbs, outdir):
     """
-    写入文件
+    Write files.
     """
     os.makedirs(outdir, exist_ok=True)
     written_count = 0
 
     for seed, pdb_list in string_to_pdbs.items():
-        # 检查该 seed 下的所有 PDB 文件是否都已存在
-        # 如果都存在，直接跳过计算和写入
+        # Check whether all PDB files for this seed already exist
+        # If so, skip computation and writing
         targets = [os.path.join(outdir, f"{p}.txt") for p in pdb_list]
         if all(os.path.exists(t) for t in targets):
             continue
 
-        # --- 合并数据 ---
+        # --- Merge data ---
         rec = []
         rec.extend(edges_1hop.get(seed, []))
         rec.extend(edges_2hop.get(seed, []))
@@ -482,23 +482,23 @@ def write_pdb_files_with_resume(edges_1hop, edges_2hop, string_to_pdbs, outdir):
         else:
             df_seed = pd.DataFrame(rec, columns=["p1_temp", "p2_temp", "score"])
             
-            # 排序逻辑：保证无向图边的一致性 (min, max)
+            # Sorting ensures consistent undirected edges (min, max)
             a = df_seed["p1_temp"]
             b = df_seed["p2_temp"]
             df_seed["protein1"] = list(map(min, zip(a, b)))
             df_seed["protein2"] = list(map(max, zip(a, b)))
             
-            # 去重：保留分数最高的
+            # Deduplicate by retaining the highest score
             df_seed = (
                 df_seed[["protein1", "protein2", "score"]]
                 .sort_values(["protein1", "protein2", "score"], ascending=[True, True, False])
                 .drop_duplicates(subset=["protein1", "protein2"], keep="first")
             )
 
-        # 逐个写入 PDB 文件
+        # Write PDB files one by one
         for pdb_chain in pdb_list:
             out_path = os.path.join(outdir, f"{pdb_chain}.txt")
-            # 再次检查，防止多线程或其他情况（虽然这里是单线程）
+            # Check again to guard against multiple threads or other races (though this code is single-threaded)
             if os.path.exists(out_path):
                 continue
             
@@ -512,11 +512,11 @@ def main():
     taxid_to_string_to_pdbs, records_all = load_mapping_grouped_by_taxid(MAPPING_FILE)
     missing_lines = []
 
-    # 直接遍历所有 TaxID，进度条显示
-    # 使用 list() 包装 keys，确保顺序固定
+    # Iterate directly over all TaxIDs with a progress bar
+    # Wrap keys in list() to ensure a fixed order
     all_taxids = list(taxid_to_string_to_pdbs.keys())
     
-    print(f"🚀 开始处理 {len(all_taxids)} 个物种的任务...")
+    print(f"🚀 Starting tasks for {len(all_taxids)} species...")
     
     pbar = tqdm(all_taxids, desc="Processing Species")
     
@@ -524,13 +524,13 @@ def main():
         string_to_pdbs = taxid_to_string_to_pdbs[taxid]
         
         # ----------------------------------------------------
-        # ⭐ 优化的断点续传检查 ⭐
-        # 在加载巨大 CSV 之前，检查该物种下 *所有* PDB 是否都已经有结果了
-        # 如果全部都存在，直接 continue，不再读取 CSV，秒过
+        # ⭐ Optimized resume check ⭐
+        # Before loading the large CSV, check whether *all* PDBs for this species already have results
+        # If all exist, continue immediately without reading the CSV
         # ----------------------------------------------------
         all_done = True
-        # 抽样检查：如果物种PDB很多，检查所有文件可能会有IO耗时，
-        # 但相比读几十GB CSV，这点IO耗时是可以接受的。
+        # Checking every file may incur I/O overhead for species with many PDBs,
+        # but this is acceptable compared with reading tens of gigabytes of CSV data.
         for pdb_list in string_to_pdbs.values():
             for p in pdb_list:
                 if not os.path.exists(os.path.join(OUTPUT_DIR, f"{p}.txt")):
@@ -539,7 +539,7 @@ def main():
             if not all_done: break
         
         if all_done:
-            # pbar.write(f"[{taxid}] 跳过 (已完成)")
+            # pbar.write(f"[{taxid}] Skipped (complete)")
             continue
         # ----------------------------------------------------
 
@@ -547,26 +547,26 @@ def main():
         species_file = os.path.join(SPECIES_DIR, f"{taxid}.protein.links.v12.0.txt.gz")
 
         if not os.path.exists(species_file):
-            # pbar.write(f"⚠️ 缺失物种文件: {taxid}")
+            # pbar.write(f"⚠️ Missing species file: {taxid}")
             for string_id, pdb_list in string_to_pdbs.items():
                 for pdb_chain in pdb_list:
                     missing_lines.append(f"{pdb_chain}\t{string_id}\t{taxid}")
             continue
 
         try:
-            # Step 1: 读取 CSV (C引擎加速 + 内存优化)
+            # Step 1: Read CSV (C-engine acceleration + memory optimization)
             pbar.set_postfix({"TaxID": taxid, "Status": "Reading CSV"})
             
             df = pd.read_csv(
                 species_file,
-                sep=" ",  # STRING v12 是空格分隔
+                sep=" ",  # STRING v12 is space-delimited
                 compression="gzip",
                 usecols=["protein1", "protein2", "combined_score"],
                 dtype={"protein1": "string", "protein2": "string", "combined_score": "int32"}
             )
             df = df.rename(columns={"combined_score": "score"})
             
-            # Step 2: 计算 Top-K 子图
+            # Step 2: Compute Top-K subgraphs
             pbar.set_postfix({"TaxID": taxid, "Status": "Graph Build"})
             seeds_this_species = set(string_to_pdbs.keys())
             
@@ -574,11 +574,11 @@ def main():
                 df, seeds_this_species, k1=TOP_K_1HOP, k2=TOP_K_2HOP
             )
 
-            # Step 3: 写入文件
+            # Step 3: Write files
             pbar.set_postfix({"TaxID": taxid, "Status": "Writing"})
             count = write_pdb_files_with_resume(edges_1hop, edges_2hop, string_to_pdbs, OUTPUT_DIR)
             
-            # pbar.write(f"[{taxid}] 生成了 {count} 个文件")
+            # pbar.write(f"[{taxid}] Generated {count} files")
 
         except Exception as e:
             pbar.write(f"❌ Error processing species {taxid}: {e}")
@@ -588,9 +588,9 @@ def main():
         with open(MISSING_LOG, "w") as f:
             for line in missing_lines:
                 f.write(line + "\n")
-        print(f"\n⚠️ 缺失记录已写入: {MISSING_LOG}")
+        print(f"\n⚠️ Missing records written to: {MISSING_LOG}")
     else:
-        print("\n✅ 所有任务完成！")
+        print("\n✅ All tasks complete!")
 
 if __name__ == "__main__":
     main()

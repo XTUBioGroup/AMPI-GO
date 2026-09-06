@@ -3,18 +3,18 @@ import tensorflow as tf
 import numpy as np
 from tqdm import tqdm
 
-# tfrecord_dir = '.\PDB-GO-valid'        # 你的 .tfrecords 文件所在路径
-# save_dir = "./ca_matrices_valid"                # 保存 .npy 的目录
+# tfrecord_dir = '.\PDB-GO-valid'        # Directory containing your .tfrecords files
+# save_dir = "./ca_matrices_valid"                # Directory for saving .npy files
 # def extract_all_ca_from_tfrecords(tfrecord_dir, save_dir=None):
 #     """
-#     批量从指定目录下的所有 .tfrecords 文件中提取 Cα 距离矩阵
+#     Extract Cα distance matrices in batches from all .tfrecords files in a directory.
 
-#     参数:
-#         tfrecord_dir: 包含 .tfrecords 文件的目录
-#         save_dir: 如果不为 None，提取结果会保存为 .npy 文件
+#     Parameters:
+#         tfrecord_dir: Directory containing .tfrecords files
+#         save_dir: If not None, save extracted results as .npy files
 
-#     返回:
-#         提取出的 dict，格式为 {prot_id: ca_dist_matrix}
+#     Returns:
+#         Extracted dictionary in the format {prot_id: ca_dist_matrix}
 #     """
 #     os.makedirs(save_dir, exist_ok=True) if save_dir else None
 #     tfrecord_files = sorted(
@@ -63,37 +63,37 @@ def extract_all_ca_from_tfrecords_with_t5match(
     save_dir
 ):
     """
-    修复大小写问题：根据 ProtT5 embedding 的序列长度匹配 TFRecord 中的 CA 矩阵。
+    Resolve case mismatches by matching TFRecord CA matrices to ProtT5 embedding sequence lengths.
 
-    参数:
-        tfrecord_dir: .tfrecords 文件目录（Linux 原始）
-        feat_dir: Windows 下产生的 ProtT5 特征目录（大小写不敏感）
-        invalid_pid_list: 无效蛋白质列表（因 mismatch 产生）
-        save_dir: 要保存 CA 距离矩阵的目录
+    Parameters:
+        tfrecord_dir: Directory of original Linux .tfrecords files
+        feat_dir: ProtT5 feature directory generated on Windows (case-insensitive)
+        invalid_pid_list: List of invalid proteins produced by mismatches
+        save_dir: Directory in which to save CA distance matrices
 
-    返回:
-        None（仅保存 .npy）
+    Returns:
+        None (only saves .npy files)
     """
     os.makedirs(save_dir, exist_ok=True)
 
     # ================
-    # 1) 从 feat_dir 构建: {lowercase_prot_id → (true_name, seq_len)}
+    # 1) Build from feat_dir: {lowercase_prot_id -> (true_name, seq_len)}
     # ================
     feat_map = {}  # {lowercase_pid: (real_pid, L)}
     for fname in os.listdir(feat_dir):
         if fname.endswith(".pt"):
-            real_pid = fname[:-3]  # 去掉 .pt
+            real_pid = fname[:-3]  # Remove .pt
             lower_pid = real_pid.lower()
 
             feat = torch.load(os.path.join(feat_dir, fname))
-            L = feat.shape[0]  # ProtT5 embedding 序列长度
+            L = feat.shape[0]  # ProtT5 embedding sequence length
 
             feat_map[lower_pid] = (real_pid, L)
 
     print(f"[INFO] Loaded {len(feat_map)} T5 embeddings for length matching")
 
     # ================
-    # 2) TFRecord 解析器
+    # 2) TFRecord parser
     # ================
     feature_description = {
         'prot_id': tf.io.FixedLenFeature([], tf.string),
@@ -102,7 +102,7 @@ def extract_all_ca_from_tfrecords_with_t5match(
     }
 
     # ================
-    # 3) 遍历 TFRecords
+    # 3) Iterate over TFRecords
     # ================
     tf_files = sorted(
         [os.path.join(tfrecord_dir, f) for f in os.listdir(tfrecord_dir) if f.endswith(".tfrecords")]
@@ -118,25 +118,25 @@ def extract_all_ca_from_tfrecords_with_t5match(
             linux_pid_lower = linux_pid.lower()
             L = int(example['L'].numpy())
 
-            # 仅处理 invalid 列表中的蛋白
+            # Process only proteins in the invalid list
             if linux_pid not in invalid_pid_list and linux_pid_lower not in invalid_pid_list:
                 continue
 
             # ================
-            # 大小写匹配：根据长度匹配 Windows PID
+            # Case-insensitive matching: Match Windows PIDs by length
             # ================
             if linux_pid_lower not in feat_map:
-                print(f"[SKIP] {linux_pid} 找不到对应的 T5 embedding，跳过")
+                print(f"[SKIP] No matching T5 embedding found for {linux_pid}; skipping")
                 continue
 
             real_pid, t5_len = feat_map[linux_pid_lower]
 
             if t5_len != L:
-                print(f"[WARN] 长度不一致: TFRecord={L}, T5={t5_len}, pid={real_pid}")
+                print(f"[WARN] Length mismatch: TFRecord={L}, T5={t5_len}, pid={real_pid}")
                 continue
 
             # ================
-            # 提取 CA
+            # Extract CA
             # ================
             ca_flat = tf.sparse.to_dense(example['ca_dist_matrix']).numpy()
             ca_matrix = ca_flat.reshape((L, L))
@@ -147,19 +147,19 @@ def extract_all_ca_from_tfrecords_with_t5match(
 
 
 # =============================
-# 使用示例
+# Usage example
 # =============================
 
-# 你的参数
+# Parameters
 tfrecord_dir = "./PDB-GO-train"
 feat_dir = "protT5_embeddings_train"
 save_dir = "./ca_matrices"
 
-# 加载 invalid 列表
+# Load the invalid list
 invalid_file = "graphs_train/invalid_proteins.txt"
 invalid_pid_list = [line.strip() for line in open(invalid_file, "r") if line.strip()]
 
-# 执行
+# Run
 extract_all_ca_from_tfrecords_with_t5match(
     tfrecord_dir=tfrecord_dir,
     feat_dir=feat_dir,

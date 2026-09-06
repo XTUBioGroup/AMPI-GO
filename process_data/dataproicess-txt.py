@@ -2,11 +2,11 @@ import tensorflow as tf
 import numpy as np
 import os
 
-# 蛋白质字符表（与你的 one-hot 编码一致）
+# Protein alphabet (consistent with the one-hot encoding)
 chars = ['-', 'D', 'G', 'U', 'L', 'N', 'T', 'K', 'H', 'Y', 'W', 'C', 'P',
          'V', 'S', 'O', 'I', 'E', 'F', 'X', 'Q', 'A', 'B', 'Z', 'R', 'M']
 
-# TFRecord feature解析格式
+# TFRecord feature parsing schema
 def parse_example(example_proto):
     feature_description = {
         'prot_id': tf.io.FixedLenFeature([], tf.string),
@@ -15,15 +15,15 @@ def parse_example(example_proto):
     }
     return tf.io.parse_single_example(example_proto, feature_description)
 
-# 输入目录 & 输出文件
-tfrecord_dir = '.\PDB-GO-valid'  # 替换为你的路径
+# Input directory and output file
+tfrecord_dir = '.\PDB-GO-valid'  # Replace with your path
 output_file = 'protein_id_and_sequence_valid.txt'
 
-# 收集所有 tfrecords 文件
+# Collect all TFRecord files
 tfrecord_files = sorted([os.path.join(tfrecord_dir, f)
                          for f in os.listdir(tfrecord_dir) if f.endswith('.tfrecords')])
 
-# 打开写文件
+# Open the output file for writing
 with open(output_file, 'w') as out_f:
     for tfrecord_path in tfrecord_files:
         print(f"Processing: {tfrecord_path}")

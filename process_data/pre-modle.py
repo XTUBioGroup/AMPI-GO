@@ -3,7 +3,7 @@
 # import re
 # import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "3" 
-# # ================== 配置区 ==================
+# # ================== Configuration ==================
 # MODEL_PATH = "huggingface_cache/hub/models--Rostlab--prot_t5_xl_uniref50/snapshots/973be27c52ee6474de9c945952a8008aeb2a1a73"
 # FASTA_FILE = "supplement_sequences.fasta"
 # CORRUPTED_ID_FILE = "split_missing_ids.txt"
@@ -19,7 +19,7 @@
 
 # def read_fasta_selective(fasta_path, target_ids):
 #     """
-#     只读取 corrupted_ids.txt 中的蛋白
+#     Read only proteins listed in corrupted_ids.txt
 #     """
 #     results = {}
 #     current_id = None
@@ -59,7 +59,7 @@
 
 # def safe_save_embedding(tensor, path):
 #     """
-#     原子写入，防止写一半就中断 → corrupted pt
+#     Write atomically to prevent interruption from producing a corrupted .pt file
 #     """
 #     tmp = path + ".tmp"
 #     torch.save(tensor, tmp)
@@ -87,10 +87,10 @@
 #     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 #     corrupted_ids = load_corrupted_ids(CORRUPTED_ID_FILE)
-#     print(f"🔁 需要重算的蛋白数量: {len(corrupted_ids)}")
+#     print(f"🔁 Proteins requiring recomputation: {len(corrupted_ids)}")
 
 #     seq_dict = read_fasta_selective(FASTA_FILE, corrupted_ids)
-#     print(f"📖 从 FASTA 中成功提取: {len(seq_dict)} 条序列")
+#     print(f"📖 Successfully extracted {len(seq_dict)} sequences from FASTA")
 
 #     tokenizer, model = get_model()
 
@@ -99,20 +99,20 @@
 #             emb = run_inference(seq, tokenizer, model)
 #             save_path = os.path.join(OUTPUT_DIR, f"{pid}.pt")
 #             safe_save_embedding(emb, save_path)
-#             print(f"[{i}/{len(seq_dict)}] ✅ 重算成功: {pid}", end="\r")
+#             print(f"[{i}/{len(seq_dict)}] ✅ Recomputed successfully: {pid}", end="\r")
 
 #         except RuntimeError as e:
-#             print(f"\n❌ GPU 失败 {pid}: {e}")
+#             print(f"\n❌ GPU failure for {pid}: {e}")
 #             torch.cuda.empty_cache()
 
-#     print("\n🎉 所有 corrupted embedding 已处理完成")
+#     print("\n🎉 All corrupted embeddings have been processed")
 
 
 # if __name__ == "__main__":
 #     main()
 
 
-##########蛋白质级序列嵌入
+########## Protein-level sequence embeddings
 
 import os
 import re
@@ -121,7 +121,7 @@ import torch
 from transformers import T5Tokenizer, T5EncoderModel
 from tqdm import tqdm
 
-# ===== 用户配置区 =====
+# ===== User configuration =====
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "3" 
 
@@ -129,9 +129,9 @@ MODEL_PATH = r"huggingface_cache/hub/models--Rostlab--prot_t5_xl_uniref50/snapsh
 SEQ_FILE = r"supplement_ids_seq.txt"
 SAVE_DIR = r"extra_protT5_embeds_train_supplemem"
 
-# 分块策略配置
-MIN_CHUNK_SIZE = 3000   # 二分查找的下限
-DEFAULT_OVERLAP = 1024   # 必须保证 chunk_size > 2 * overlap
+# Chunking-strategy configuration
+MIN_CHUNK_SIZE = 3000   # Lower bound for binary search
+DEFAULT_OVERLAP = 1024   # Must ensure chunk_size > 2 * overlap
 
 # =================================================
 
@@ -152,7 +152,7 @@ def load_id_sequences(path):
 
 
 def preprocess_seq_for_t5(seq: str) -> str:
-    """ProtT5 标准预处理"""
+    """Standard ProtT5 preprocessing."""
     seq = seq.strip().upper().replace(" ", "")
     seq = re.sub(r"[UZOB]", "X", seq)
     return " ".join(list(seq))
@@ -160,7 +160,7 @@ def preprocess_seq_for_t5(seq: str) -> str:
 
 def run_model_forward(model, tokenizer, seq, device):
     """
-    基础的前向传播函数，返回 hidden_states 和 attention_mask
+    Basic forward-pass function that returns hidden_states and attention_mask.
     """
     proc = preprocess_seq_for_t5(seq)
     inputs = tokenizer([proc], return_tensors="pt", padding=True)
@@ -176,7 +176,7 @@ def run_model_forward(model, tokenizer, seq, device):
 
 def encode_whole_sequence(model, tokenizer, seq, device):
     """
-    尝试整条编码。如果成功返回 embedding，失败抛出 OOM 异常。
+    Attempt to encode the full sequence. Return the embedding on success; raise an OOM exception on failure.
     """
     hidden, attn_mask = run_model_forward(model, tokenizer, seq, device)
     
@@ -191,123 +191,123 @@ def encode_whole_sequence(model, tokenizer, seq, device):
 
 def encode_with_sliding_window(model, tokenizer, seq, device, chunk_size, overlap=DEFAULT_OVERLAP):
     """
-    当整条失败时，使用滑动窗口策略进行编码。
-    策略：重叠切分，只取中间部分求和，最后除以总长。
+    Use a sliding-window strategy when full-sequence encoding fails.
+    Strategy: Split with overlap, sum only the middle sections, then divide by the total length.
     """
     L = len(seq)
     sum_embeds = torch.zeros(1024, dtype=torch.float32)
     
-    # 步长 = 窗口大小 - 重叠
+    # Stride = window size - overlap
     stride = chunk_size - overlap
     if stride <= 0:
-        stride = chunk_size // 2 # 保底防止死循环
+        stride = chunk_size // 2 # Fallback to prevent an infinite loop
 
     for i in range(0, L, stride):
-        # 1. 确定当前窗口 [start : end]
+        # 1. Determine the current window [start : end]
         start = i
         end = min(i + chunk_size, L)
         
-        # 如果是最后一块且完全包含在前一块的有效区内，可以跳过（简化处理，这里不跳过以保证覆盖）
+        # The final chunk could be skipped if fully covered by the previous valid region; keep it here to ensure coverage
         chunk_seq = seq[start:end]
         current_chunk_len = len(chunk_seq)
         
-        # 2. 运行模型
+        # 2. Run the model
         hidden, _ = run_model_forward(model, tokenizer, chunk_seq, device)
         token_embeds = hidden.squeeze(0).cpu() # [chunk_len, 1024]
         
-        # 3. 截取有效区域（剔除 overlap 带来的边缘效应）
-        # 规则：除了第一块和最后一块，中间的块都掐头去尾 overlap/2
+        # 3. Extract the valid region (remove boundary effects introduced by overlap)
+        # Rule: Trim overlap/2 from both ends of intermediate chunks, excluding the first and last chunks
         valid_start = 0
         valid_end = current_chunk_len
         
-        if i > 0: # 不是第一块，去掉开头的 overlap/2
+        if i > 0: # Not the first chunk: remove overlap/2 from the start
             valid_start = overlap // 2
         
-        if end < L: # 不是最后一块，去掉结尾的 overlap/2
+        if end < L: # Not the last chunk: remove overlap/2 from the end
             valid_end = current_chunk_len - (overlap // 2)
         
-        # 4. 累加有效部分的 Sum
-        # 注意：这里我们做的是 Global Mean Pooling 的拆解版 -> Sum(所有token) / L
-        # 所以只需要把所有 token 的 embedding 加起来即可
+        # 4. Accumulate the sum of valid regions
+        # This decomposes global mean pooling as Sum(all tokens) / L
+        # Therefore, simply add the embeddings of all tokens
         valid_tokens = token_embeds[valid_start:valid_end, :]
         sum_embeds += valid_tokens.sum(dim=0)
         
-        # 显存清理
+        # Release GPU memory
         del hidden, token_embeds
         if device.type == "cuda":
             torch.cuda.empty_cache()
 
-    # 5. 计算全局平均
+    # 5. Compute the global mean
     final_emb = sum_embeds / L
     return final_emb
 
 
 def find_max_chunk_size(model, tokenizer, seq, device):
     """
-    二分查找：在 [MIN_CHUNK, Len-1] 之间找到最大的可行 chunk_size
+    Binary search for the largest feasible chunk_size in [MIN_CHUNK, Len-1].
     """
     L = len(seq)
     low = MIN_CHUNK_SIZE
     high = L - 1
-    best_chunk = MIN_CHUNK_SIZE # 默认保底
+    best_chunk = MIN_CHUNK_SIZE # Default fallback
 
-    # 简单优化：如果上次找到的 chunk_size 能用，可以先试一下，这里省略
+    # Simple optimization: Try the last successful chunk_size first; omitted here
     
     while low <= high:
         mid = (low + high) // 2
         try:
-            # 试跑一下前 mid 个字符
-            # 不需要跑完整个 encode 流程，只要 forward 不爆就行
+            # Test the first mid characters
+            # A full encode is unnecessary; only verify that the forward pass does not fail
             test_seq = seq[:mid]
             _ = run_model_forward(model, tokenizer, test_seq, device)
             
-            # 成功了，说明 mid 可行，尝试更大的
+            # Success means mid is feasible; try a larger value
             best_chunk = mid
             low = mid + 1
             
-            # 清理
+            # Clean up
             if device.type == "cuda":
                 torch.cuda.empty_cache()
                 
         except RuntimeError as e:
             if "out of memory" in str(e):
-                # 失败了，说明 mid 太大
+                # Failure means mid is too large
                 high = mid - 1
                 if device.type == "cuda":
                     torch.cuda.empty_cache()
             else:
-                raise e # 其他错误直接抛出
+                raise e # Re-raise other errors directly
 
     return best_chunk
 
 
 def smart_encode(model, tokenizer, seq, device):
     """
-    智能编码入口：
-    1. 尝试整条 -> 成功返回
-    2. 失败 -> 二分查找最大 Chunk -> 滑动窗口编码
+    Adaptive encoding entry point:
+    1. Try the full sequence -> return on success
+    2. On failure -> binary-search for the largest chunk -> encode with a sliding window
     """
     L = len(seq)
     
-    # --- 策略 1: 优先整条 ---
+    # --- Strategy 1: Prefer the full sequence ---
     try:
         return encode_whole_sequence(model, tokenizer, seq, device)
     
     except RuntimeError as e:
         if "out of memory" not in str(e):
-            raise e # 非 OOM 错误直接报错
+            raise e # Re-raise non-OOM errors directly
         
-        # OOM 发生，清理显存
-        print(f"  [Len={L}] 整条 OOM，触发分块策略...")
+        # OOM occurred; release GPU memory
+        print(f"  [Len={L}] Full-sequence OOM; activating the chunking strategy...")
         if device.type == "cuda":
             torch.cuda.empty_cache()
 
-    # --- 策略 2: 二分查找 + 滑动窗口 ---
-    # 确定最大安全分块大小
+    # --- Strategy 2: Binary search + sliding window ---
+    # Determine the largest safe chunk size
     max_chunk = find_max_chunk_size(model, tokenizer, seq, device)
-    print(f"  [Len={L}] 测得最大分块: {max_chunk} (Overlap={DEFAULT_OVERLAP})")
+    print(f"  [Len={L}] Largest tested chunk: {max_chunk} (Overlap={DEFAULT_OVERLAP})")
     
-    # 使用该分块大小进行平滑编码
+    # Perform smooth encoding with this chunk size
     return encode_with_sliding_window(model, tokenizer, seq, device, max_chunk, overlap=DEFAULT_OVERLAP)
 
 
@@ -316,29 +316,29 @@ def main():
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
-        print(f"使用 GPU: {torch.cuda.get_device_name(0)}")
+        print(f"Using GPU: {torch.cuda.get_device_name(0)}")
     else:
         device = torch.device("cpu")
-        print("⚠ 未检测到 CUDA，将使用 CPU")
+        print("⚠ CUDA not detected; using CPU")
 
-    print("加载 ProtT5 模型...")
+    print("Loading the ProtT5 model...")
     tokenizer = T5Tokenizer.from_pretrained(MODEL_PATH, do_lower_case=False, local_files_only=True)
     model = T5EncoderModel.from_pretrained(MODEL_PATH, local_files_only=True).to(device)
     model.eval()
 
     ids, seqs = load_id_sequences(SEQ_FILE)
-    print(f"任务总数: {len(ids)}")
+    print(f"Total tasks: {len(ids)}")
 
-    # 1. 过滤已完成的任务 (断点续传)
+    # 1. Filter completed tasks (resume support)
     todo_list = []
     for pid, seq in zip(ids, seqs):
         save_path = os.path.join(SAVE_DIR, f"{pid}.pt")
         if not os.path.exists(save_path):
             todo_list.append((pid, seq))
             
-    print(f"已跳过 {len(ids) - len(todo_list)} 个，剩余 {len(todo_list)} 个待处理。")
+    print(f"Skipped {len(ids) - len(todo_list)}; {len(todo_list)} remain.")
 
-    # 2. 处理剩余任务
+    # 2. Process remaining tasks
     with torch.no_grad():
         for pid, seq in tqdm(todo_list, desc="Embedding"):
             seq = seq.strip()
@@ -348,7 +348,7 @@ def main():
             save_path = os.path.join(SAVE_DIR, f"{pid}.pt")
             
             try:
-                # 调用智能编码逻辑
+                # Invoke adaptive encoding logic
                 emb = smart_encode(model, tokenizer, seq, device)
                 torch.save(emb, save_path)
             
@@ -357,7 +357,7 @@ def main():
                 if device.type == "cuda":
                     torch.cuda.empty_cache()
 
-    print("✅ 所有任务完成。")
+    print("✅ All tasks complete.")
 
 
 if __name__ == "__main__":

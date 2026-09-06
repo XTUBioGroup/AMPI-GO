@@ -17,7 +17,7 @@ from model_utils import test_performance_gnn_inter, FocalLoss
 
 
 ##########################################################
-# 数据加载工具函数
+# Data-loading utility functions
 ##########################################################
 def load_pid_from_seq_file(path):
     pid_list = []
@@ -47,8 +47,8 @@ def load_graphs_for_pid_list(pid_list, folder):
 
 def load_ppi_graph_for_pid_list(pid_list, folder):
     """
-    专门加载 PPI 图：
-    ⚠️ 不要动自环和边权，保持构图脚本里的信息
+    Load PPI graphs specifically:
+    ⚠️ Preserve self-loops and edge weights from the graph-building script.
     """
     graphs = []
     for pid in tqdm(pid_list, desc=f"Loading PPI graphs from {folder}"):
@@ -58,16 +58,16 @@ def load_ppi_graph_for_pid_list(pid_list, folder):
     return graphs
 
 def load_pdb2go(path):
-    """读取你之前生成的 pdb2go.json"""
+    """Read the previously generated pdb2go.json file."""
     with open(path, "r") as f:
         return json.load(f)
 
 
 def build_go_lists_for_ontology(pid_list, pdb2go, ont_key):
     """
-    根据 pid_list 和 pdb2go.json，构造 DPFunc 风格的 GO 列表（list[set[go_id]]）
 
-    ont_key 取值：'molecular_function' / 'biological_process' / 'cellular_component'
+
+    ont_key can be 'molecular_function', 'biological_process', or 'cellular_component'.
     """
     go_lists = []
 
@@ -75,7 +75,7 @@ def build_go_lists_for_ontology(pid_list, pdb2go, ont_key):
         term_set = set()
 
         if pid in pdb2go:
-            # 例如 pdb2go[pid]["molecular_function"] 是一个 list，每个元素可能是 "GO:0001234,GO:0005678"
+            # For example, pdb2go[pid]["molecular_function"] is a list whose items may look like "GO:0001234,GO:0005678".
             raw_list = pdb2go[pid].get(ont_key, [])
             for go_str in raw_list:
                 for go in go_str.split(","):
@@ -83,14 +83,14 @@ def build_go_lists_for_ontology(pid_list, pdb2go, ont_key):
                     if go:
                         term_set.add(go)
 
-        # 即使 term_set 为空，也照样 append，保证长度和 pid_list 对齐
+        # Append even when term_set is empty so the result stays aligned with pid_list.
         go_lists.append(term_set)
 
     return go_lists
 
 
 #########################################################
-# 训练一个本体（MF / BP / CC）
+# Train one ontology (MF / BP / CC)
 #########################################################
 def train_one_ontology(
     ont_name,
@@ -101,16 +101,16 @@ def train_one_ontology(
     train_interpro, valid_interpro,
     train_pid_list, valid_pid_list,
     device,
-    resume=True  # 🔥 [新增参数] 是否尝试加载旧模型续练
+    resume=True  # 🔥 [New parameter] Whether to load an existing model and resume training
 ):
 
     print(f"\n==============================")
-    print(f" ⭐ 开始训练本体：{ont_name}")
+    print(f" ⭐ Starting ontology training: {ont_name}")
     print(f"==============================\n")
 
     label_num = train_y.shape[1]
     
-    # 1. DataLoader: Batch Size 改为 128
+    # 1. DataLoader: Change the batch size to 128
     BATCH_SIZE = 128
     train_data = [(train_graph[i], i, train_y[i]) for i in range(len(train_y))]
     valid_data = [(valid_graph[i], i, valid_y[i]) for i in range(len(valid_y))]
@@ -118,7 +118,7 @@ def train_one_ontology(
     train_dataloader = GraphDataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
     valid_dataloader = GraphDataLoader(valid_data, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
 
-    # 2. 模型初始化
+    # 2. Model initialization
     model = combine_inter_model(
         inter_size=train_interpro.shape[1],
         inter_hid=1024,
@@ -132,55 +132,55 @@ def train_one_ontology(
         ppi_heads1=4,
         ppi_heads2=4,
         fused_dim=256,
-        use_ppi=False,          # ❌ 关掉 PPI
+        use_ppi=False,          # ❌ Disable PPI
         use_interpro=False, 
-        fusion_type='concat',    # (此时这个参数无效)
+        fusion_type='concat',    # (This parameter has no effect here)
         use_transformer=False
     ).to(device)
 
-    # 3. 优化器与 Loss
-    # 注意：如果 Batch Size 变大 (128)，建议初始 LR 稍微给大一点点，或者保持 1e-3 看情况
+    # 3. Optimizer and loss
+    # Note: If the batch size increases to 128, consider a slightly higher initial LR, or keep 1e-3 depending on results.
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     loss_fn = FocalLoss(gamma=2.0, alpha=0.75)
 
-    # 🔥 [新增] 学习率调度器：如果 10 轮 Fmax 不涨，LR 减半
-    # patience=10 必须小于早停的 20，这样才有机会在停止前调整 LR
+    # 🔥 [New] Learning-rate scheduler: halve the LR if Fmax does not improve for 10 epochs
+    # patience=10 must be less than the early-stopping value of 20 so LR can be adjusted before training stops.
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='max', factor=0.5, patience=10, verbose=True
     )
 
-    # 4. 续练逻辑 (Resume Logic)
+    # 4. Resume logic
     best_fmax = -1.0
     best_epoch = -1
     start_epoch = 0
     save_path = f"{ont_name}_best_model_wo_all.pt"
 
     if resume and os.path.exists(save_path):
-        print(f"🔄 发现已保存的模型 {save_path}，正在加载权重以续练...")
+        print(f"🔄 Found saved model {save_path}; loading weights to resume training...")
         try:
             model.load_state_dict(torch.load(save_path))
-            print("✅ 模型权重加载成功！")
+            print("✅ Model weights loaded successfully!")
             
-            # 关键：先跑一遍验证集，看看当前的 Fmax 是多少
-            print("📊 正在基准测试加载的模型性能...")
+            # Important: Run validation first to determine the current Fmax.
+            print("📊 Benchmarking the loaded model...")
             curr_fmax, _, _, _, _ = test_performance_gnn_inter(
                 model, valid_dataloader, valid_pid_list, valid_interpro, valid_y,
                 idx_goid, goid_idx, ont_name, device,
                 loss_fn=loss_fn, valid_ppi_graph=valid_ppi_graph
             )
             best_fmax = curr_fmax
-            print(f"🚀以此为起点继续训练: Current Best Fmax = {best_fmax:.4f}")
+            print(f"🚀 Resuming training from this point: Current Best Fmax = {best_fmax:.4f}")
         except Exception as e:
-            print(f"⚠️ 加载失败，将重新开始训练。错误: {e}")
+            print(f"⚠️ Loading failed; training will restart from scratch. Error: {e}")
     else:
-        print("🆕 未发现旧模型或未启用 Resume，从头开始训练。")
+        print("🆕 No saved model found or resume is disabled; training from scratch.")
 
-    # 5. 训练参数设置
-    max_epochs = 150   # 总轮次增加，给足时间
-    patience = 8     # 🔥 [修改] 耐心值增加到 20
+    # 5. Training parameters
+    max_epochs = 150   # Increase the total number of epochs to allow enough time
+    patience = 8     # 🔥 [Modified] Increase patience to 20
     no_improve = 0
 
-    # 6. 训练循环
+    # 6. Training loop
     for epoch in range(start_epoch, max_epochs):
         print(f"\n[Epoch {epoch}] -------- Training (Batch={BATCH_SIZE}) --------")
 
@@ -216,7 +216,7 @@ def train_one_ontology(
 
         print(f"[{ont_name}] Epoch {epoch} | Train Loss = {train_meter.avg:.4f}")
 
-        # ========== 验证 ==========
+        # ========== Validation ==========
         print(f"[Epoch {epoch}] -------- Validating --------")
         
         fmax, aupr, cutoff, df, val_loss = test_performance_gnn_inter(
@@ -235,11 +235,11 @@ def train_one_ontology(
 
         print(f"🔍 [{ont_name}] Valid Fmax={fmax:.4f}, AUPR={aupr:.4f}, Loss={val_loss:.4f}")
 
-        # 🔥 更新 Scheduler
-        # 告诉调度器当前的 Fmax，让它决定是否要降学习率
+        # 🔥 Update the scheduler
+        # Pass the current Fmax to the scheduler so it can decide whether to reduce the learning rate.
         scheduler.step(fmax)
 
-        # ===== 早停 & 保存 =====
+        # ===== Early stopping and saving =====
         if fmax > best_fmax:
             change = fmax - best_fmax
             best_fmax = fmax
@@ -248,27 +248,27 @@ def train_one_ontology(
             save_dir = os.path.dirname(save_path)
             if save_dir and not os.path.exists(save_dir):
                 os.makedirs(save_dir)
-                print(f"📁 已自动创建文件夹: {save_dir}")
+                print(f"📁 Created directory automatically: {save_dir}")
             torch.save(model.state_dict(), save_path)
-            print(f"💾 [New Best] 提升 {change:.4f} -> 模型已保存至 {save_path}")
+            print(f"💾 [New Best] Improved by {change:.4f} -> Model saved to {save_path}")
         else:
             no_improve += 1
-            print(f"⚠️ Fmax 未提升: {no_improve}/{patience} (Best: {best_fmax:.4f})")
+            print(f"⚠️ Fmax did not improve: {no_improve}/{patience} (Best: {best_fmax:.4f})")
             
             if no_improve >= patience:
-                print(f"⏹ 早停触发：Fmax 已连续 {patience} 轮未提升。")
-                print("💡 提示：如果发现 Loss 还在降但 Fmax 不动，可以尝试微调 Focal Loss 参数。")
+                print(f"⏹ Early stopping triggered: Fmax did not improve for {patience} consecutive epochs.")
+                print("💡 Tip: If loss is still decreasing while Fmax is unchanged, try tuning the focal-loss parameters.")
                 break
 
-    print(f"\n[{ont_name}] 训练结束！最终最佳模型 Epoch {best_epoch}, Fmax={best_fmax:.4f}\n")
+    print(f"\n[{ont_name}] Training complete! Final best model: Epoch {best_epoch}, Fmax={best_fmax:.4f}\n")
 
 ##########################################################
-# 主函数（自动循环 MF/BP/CC）
+# Main function (automatically iterates over MF/BP/CC)
 ##########################################################
 def main():
     device = torch.device("cuda")
 
-    # 映射：ontology 名称 -> pdb2go 中的 key
+    # Mapping: ontology name -> key in pdb2go
     ont2key = {
         "mf": "molecular_function",
         "bp": "biological_process",
@@ -277,32 +277,32 @@ def main():
 
     for ont in ["mf", "bp", "cc"]:
         print(f"\n############################")
-        print(f"### 开始处理本体：{ont} ###")
+        print(f"### Starting ontology: {ont} ###")
         print(f"############################\n")
 
         # ===============================
-        # 🔥 1. 按本体重新加载 PID 列表
+        # 🔥 1. Reload the PID list for this ontology
         # ===============================
         train_pid_list = load_pid_from_seq_file(f"data_split/{ont}_train_ids.txt")
         valid_pid_list = load_pid_from_seq_file(f"data_split/{ont}_valid_ids.txt")
 
-        print(f"[{ont}] Train PID 数: {len(train_pid_list)}")
-        print(f"[{ont}] Valid PID 数: {len(valid_pid_list)}")
+        print(f"[{ont}] Training PID count: {len(train_pid_list)}")
+        print(f"[{ont}] Validation PID count: {len(valid_pid_list)}")
 
         # ===============================
-        # 2. 加载结构图
+        # 2. Load structure graphs
         # ===============================
         train_graph = load_graphs_for_pid_list(train_pid_list, "graphs")
         valid_graph = load_graphs_for_pid_list(valid_pid_list, "graphs")
 
         # ===============================
-        # 3. 加载 PPI 图
+        # 3. Load PPI graphs
         # ===============================
         train_ppi_graph = load_ppi_graph_for_pid_list(train_pid_list, "ppi_graphs")
         valid_ppi_graph = load_ppi_graph_for_pid_list(valid_pid_list, "ppi_graphs")
 
         # ===============================
-        # 4. 加载 InterPro 特征
+        # 4. Load InterPro features
         # ===============================
         train_interpro = pkl.load(open(f"interpro_feature_{ont}_train.pkl", "rb"))
         valid_interpro = pkl.load(open(f"interpro_feature_{ont}_valid.pkl", "rb"))
@@ -310,7 +310,7 @@ def main():
         assert train_interpro.shape[1] == valid_interpro.shape[1]
 
         # ===============================
-        # 5. 构造 GO 标签
+        # 5. Build GO labels
         # ===============================
         pdb2go = load_pdb2go("pdb2go_propagate.json")
         ont_key = ont2key[ont]
@@ -326,7 +326,7 @@ def main():
         goid_idx = {go: i for i, go in idx_goid.items()}
 
         # ===============================
-        # 6. 训练该本体模型
+        # 6. Train the model for this ontology
         # ===============================
         train_one_ontology(
             ont,

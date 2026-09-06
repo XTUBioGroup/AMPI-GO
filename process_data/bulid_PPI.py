@@ -5,7 +5,7 @@ import dgl
 from tqdm import tqdm
 from collections import defaultdict
 
-# ===== 1. 路径设置 =====
+# ===== 1. Path configuration =====
 ppi_dir = "ppi_from_species_2hop_valid_100_10_supplement"   
 embed_dir = [
     "extra_protT5_embeds_train",
@@ -16,29 +16,29 @@ mapping_file = "pdb_uniprot_string_supplement.txt"
 
 os.makedirs(save_dir, exist_ok=True)
 
-# ===== 2. 全局缓存 =====
-# embed_cache 里混合了 "1MZH-A" (PDB) 和 "9606.ENSP..." (STRING) 两种 Key
+# ===== 2. Global cache =====
+# embed_cache contains both "1MZH-A" (PDB) and "9606.ENSP..." (STRING) keys
 embed_cache = {}       
 string_to_pdbs = defaultdict(list) 
 
-# ===== 3. 预加载 Embeddings =====
+# ===== 3. Preload embeddings =====
 def preload_embeddings():
-    print(f"🚀 开始加载 3个文件夹的 Embeddings...")
+    print(f"🚀 Starting to load embeddings from three directories...")
     
     total_files = 0
     
     for d in embed_dir:
         if not os.path.exists(d):
-            print(f"⚠️ 警告: 路径不存在 {d}，跳过")
+            print(f"⚠️ Warning: Path does not exist: {d}; skipping")
             continue
             
         files = [f for f in os.listdir(d) if f.endswith(".pt")]
-        print(f"📂 正在加载 {d} ({len(files)} 个文件)...")
+        print(f"📂 Loading {d} ({len(files)} files)...")
         
         for f in tqdm(files, desc="Loading", leave=False):
-            node_id = os.path.splitext(f)[0] # 区分大小写 (WSL环境)
+            node_id = os.path.splitext(f)[0] # Case-sensitive (WSL environment)
             
-            # 避免重复加载 (如果不同文件夹有同名文件，优先保留先加载的)
+            # Avoid duplicate loads (for identical names across directories, retain the first loaded file)
             if node_id in embed_cache:
                 continue
                 
@@ -51,113 +51,113 @@ def preload_embeddings():
             
         total_files += len(files)
 
-    print(f"✅ 所有嵌入加载完成！内存中共有 {len(embed_cache)} 个唯一向量。")
+    print(f"✅ All embeddings loaded! Memory contains {len(embed_cache)} unique vectors.")
 
-# ===== 4. 加载映射表 =====
+# ===== 4. Load the mapping table =====
 def load_mapping():
-    print(f"⏳ [2/4] 正在加载映射表 {mapping_file} ...")
+    print(f"⏳ [2/4] Loading mapping table {mapping_file} ...")
     try:
         with open(mapping_file, 'r') as f:
             for line in f:
                 parts = line.strip().split()
                 
-                # 1. 长度检查 (防止空行或缺列)
+                # 1. Length check (guard against empty rows or missing columns)
                 if len(parts) < 3: 
                     continue
                 
                 pdb_id = parts[0]   # 1MZH-A
-                # string_id 是第三列
+                # string_id is the third column
                 string_id = parts[2] 
 
-                # 2. 过滤 "NA" (字符串) 和其他无效值
-                # 有些文件里可能写的是 "N/A", "-", "null" 等
+                # 2. Filter "NA" strings and other invalid values
+                # Some files may use "N/A", "-", "null", etc.
                 if string_id in ["NA", "N/A", "-", "nan", "None"]:
                     continue
                 
-                # 3. 存入字典
+                # 3. Store in the dictionary
                 string_to_pdbs[string_id].append(pdb_id)
                 
     except Exception as e:
-        print(f"❌ 映射表读取失败: {e}")
+        print(f"❌ Failed to read the mapping table: {e}")
 
-# ===== 5. 核心 ID 转换逻辑 (含兜底) =====
+# ===== 5. Core ID-conversion logic (with fallback) =====
 def get_best_node_id(raw_id, current_center_pdb):
     """
-    raw_id: PPI文件里的 ID (通常是 STRING ID)
-    current_center_pdb: 当前文件对应的 PDB ID
+    raw_id: ID in the PPI file (usually a STRING ID)
+    current_center_pdb: PDB ID corresponding to the current file
     """
     
-    # 如果 raw_id 本身就在缓存里 (比如它已经是 PDB ID，或者是不需要转化的 STRING ID)
-    # 先别急着返回，先看看能不能映射成 current_center_pdb (优先级最高)
-    # 但通常 PPI 文件里全是 STRING ID，所以我们直接进映射逻辑
+    # If raw_id is already cached (for example, a PDB ID or a STRING ID requiring no conversion),
+    # do not return immediately; first check whether it maps to current_center_pdb (highest priority).
+    # PPI files usually contain only STRING IDs, so proceed directly to mapping logic.
     
     if raw_id in string_to_pdbs:
-        candidates = string_to_pdbs[raw_id] # 获取对应的 PDB 列表
+        candidates = string_to_pdbs[raw_id] # Get the corresponding PDB list
         
-        # 👑 优先级 1: 映射列表里正好包含“主角” (当前文件名)
+        # 👑 Priority 1: The mapping list contains the center protein (current filename)
         if current_center_pdb in candidates:
             return current_center_pdb
         
-        # 🥈 优先级 2: 映射成其他有向量的 PDB
+        # 🥈 Priority 2: Map to another PDB with an embedding
         for pdb in candidates:
             if pdb in embed_cache:
                 return pdb
     
-    # 🥉 优先级 3 (兜底): 
-    # - 映射表里没这个 STRING ID
-    # - 或者映射出来的 PDB 都没有向量
-    # -> 那就直接返回原始的 STRING ID
-    #    (后续构建特征时，会去 embed_cache 里查这个 STRING ID)
+    # 🥉 Priority 3 (fallback):
+    # - The mapping table does not contain this STRING ID
+    # - Or none of the mapped PDBs has an embedding
+    # -> Return the original STRING ID directly
+    #    (feature construction later looks up this STRING ID in embed_cache)
     return raw_id
 
-# ===== 6. 构图逻辑 =====
+# ===== 6. Graph-construction logic =====
 def build_ppi_graph(ppi_file):
     filename = os.path.basename(ppi_file)
     center_pdb_id = os.path.splitext(filename)[0] 
 
-    # 1. 读取文件
+    # 1. Read the file
     try:
         sep = "\t" if not ppi_file.endswith(".csv") else ","
         df = pd.read_csv(ppi_file, sep=sep)
     except Exception as e:
-        print(f"❌ [读取失败] {filename}: {e}")
-        return None # 跳过损坏文件
+        print(f"❌ [Read failed] {filename}: {e}")
+        return None # Skip corrupted files
     
-    # 2. 重命名列 (适配 STRING 格式)
+    # 2. Rename columns (adapt to STRING format)
     rename_map = {
         "protein1": "PDB_A",
         "protein2": "PDB_B",
         "score": "score",
-        "combined_score": "score" #以此类推
+        "combined_score": "score" # And so on
     }
     df = df.rename(columns=rename_map)
 
-    # 3. 检查必要列是否存在
+    # 3. Check whether required columns exist
     if not {"PDB_A", "PDB_B", "score"}.issubset(df.columns):
-        # 只有缺少关键列时才打印错误并跳过
-        # print(f"❌ [列名错误] {filename} 只有列: {list(df.columns)}") 
-        return None # 跳过格式不对的文件
+        # Print an error and skip only when critical columns are missing
+        # print(f"❌ [Invalid columns] {filename} contains only: {list(df.columns)}")
+        return None # Skip incorrectly formatted files
     
-    # 4. 清洗无效数据 (强制转数字，去空行)
+    # 4. Clean invalid data (force numeric conversion and remove empty rows)
     df['score'] = pd.to_numeric(df['score'], errors='coerce')
     df = df.dropna(subset=["PDB_A", "PDB_B", "score"])
 
-    # 5. 检查是否为空
+    # 5. Check whether the data is empty
     if df.empty: 
-        # 这里的 return None 配合主程序的 if g，就会实现“跳过”
-        # print(f"⚠️ [空数据] {filename} (已跳过)")
+        # Returning None here works with `if g` in the main program to skip the file
+        # print(f"⚠️ [Empty data] {filename} (skipped)")
         return None 
     df["score"] = df["score"].clip(lower=0, upper=1000.0) / float(1000.0)
-    # 获取所有涉及的原始 ID
+    # Get all involved raw IDs
     raw_nodes = set(df["PDB_A"]).union(set(df["PDB_B"]))
     
-    # --- ID 转换 ---
+    # --- ID conversion ---
     id_map = {} # Old -> New
-    final_node_list = [center_pdb_id] # 强制 Index 0 为中心 PDB
+    final_node_list = [center_pdb_id] # Force index 0 to be the center PDB
     seen_final_ids = {center_pdb_id}
 
     for raw in raw_nodes:
-        # 这里会执行我们的 3 级优先级逻辑
+        # Apply the three-level priority logic here
         best_id = get_best_node_id(raw, center_pdb_id)
         id_map[raw] = best_id
         
@@ -168,14 +168,14 @@ def build_ppi_graph(ppi_file):
     node_to_idx = {n: i for i, n in enumerate(final_node_list)}
     num_nodes = len(final_node_list)
 
-    # 6. 手动构建边列表 (核心修改：一次性搞定所有边)
+    # 6. Build the edge list manually (core change: create all edges at once)
     src_list = []
     dst_list = []
     weight_list = []
 
-    # (A) 添加 PPI 边 (双向)
+    # (A) Add bidirectional PPI edges
     for _, row in df.iterrows():
-        # 获取转换后的 ID
+        # Get converted IDs
         u_final = id_map.get(row["PDB_A"])
         v_final = id_map.get(row["PDB_B"])
         
@@ -184,62 +184,62 @@ def build_ppi_graph(ppi_file):
             v = node_to_idx[v_final]
             w = float(row["score"])
 
-            # 正向 u->v
+            # Forward u->v
             src_list.append(u)
             dst_list.append(v)
             weight_list.append(w)
 
-            # 反向 v->u (防止自环重复添加)
+            # Reverse v->u (avoid duplicate self-loops)
             if u != v:
                 src_list.append(v)
                 dst_list.append(u)
                 weight_list.append(w)
 
-    # (B) 添加自环 (权重设为 1.0)
+    # (B) Add self-loops (weight = 1.0)
     for i in range(num_nodes):
         src_list.append(i)
         dst_list.append(i)
-        weight_list.append(1.0) # 自环权重
+        weight_list.append(1.0) # Self-loop weight
 
-    # 7. 构建 DGL 图
+    # 7. Build the DGL graph
     src = torch.tensor(src_list, dtype=torch.long)
     dst = torch.tensor(dst_list, dtype=torch.long)
     w   = torch.tensor(weight_list, dtype=torch.float32)
 
     g = dgl.graph((src, dst), num_nodes=num_nodes)
     
-    # ✅ 这里赋值绝对安全，因为图结构已经固定了
+    # ✅ Assignment is safe here because the graph structure is fixed
     g.edata["weight"] = w 
 
-    # --- 标记中心 ---
+    # --- Mark the center ---
     mask = torch.zeros(len(final_node_list), dtype=torch.bool)
     mask[0] = True
     g.ndata["is_center"] = mask
 
-    # --- 填充特征 ---
+    # --- Populate features ---
     feats = []
     missing = 0
     for node_id in final_node_list:
-        # 这里就是见证兜底逻辑生效的地方：
-        # 如果上面的 best_id 返回了 PDB ID，这里就查 PDB Embedding
-        # 如果上面的 best_id 返回了 STRING ID，这里就查 STRING Embedding
+        # This is where the fallback logic takes effect:
+        # If best_id above returns a PDB ID, look up the PDB embedding
+        # If best_id above returns a STRING ID, look up the STRING embedding
         if node_id in embed_cache:
             feats.append(embed_cache[node_id])
         else:
             missing += 1
-            feats.append(torch.zeros(1024)) # 实在没有就补零
+            feats.append(torch.zeros(1024)) # Use zeros if no embedding is available
 
     g.ndata["x"] = torch.stack(feats)
     
     return g
 
-# ===== 7. 主程序 =====
+# ===== 7. Main program =====
 if __name__ == "__main__":
     preload_embeddings()
     load_mapping()
 
     files = [f for f in os.listdir(ppi_dir) if f.endswith((".txt", ".tsv"))]
-    print(f"🚀 [3/4] 开始构建 {len(files)} 个图...")
+    print(f"🚀 [3/4] Starting construction of {len(files)} graphs...")
 
     success = 0
     for f in tqdm(files):
@@ -251,7 +251,7 @@ if __name__ == "__main__":
                 success += 1
             except: pass
 
-    print(f"🎉 [4/4] 全部完成！成功: {success}")
+    print(f"🎉 [4/4] All done! Successful: {success}")
 
 
 
@@ -263,7 +263,7 @@ if __name__ == "__main__":
 # from tqdm import tqdm
 # from collections import defaultdict
 #
-# # ===== 1. 路径设置 =====
+# # ===== 1. Path configuration =====
 # ppi_dir = "ppi_from_species_2hop_100_10"
 # embed_dir = [
 #     "extra_protT5_embeds_train"
@@ -271,65 +271,65 @@ if __name__ == "__main__":
 # save_dir = "ppi_graphs_big"
 # mapping_file = "final_mapping_full_scan.tsv"
 #
-# # [新增] 指定只加载这些 ID 的嵌入
+# # [New] Load embeddings only for these IDs
 # target_id_file = "big_extracted_sequences_from_folder.txt"
 #
 # os.makedirs(save_dir, exist_ok=True)
 #
-# # ===== 2. 全局缓存 =====
+# # ===== 2. Global cache =====
 # embed_cache = {}
 # string_to_pdbs = defaultdict(list)
 #
-# # ===== [新增] 加载目标 ID 列表 =====
+# # ===== [New] Load the target ID list =====
 # def load_target_ids():
-#     print(f"📋 正在读取目标 ID 列表: {target_id_file} ...")
+#     print(f"📋 Reading target ID list: {target_id_file} ...")
 #     valid_ids = set()
 #     if not os.path.exists(target_id_file):
-#         print(f"❌ 错误: 找不到文件 {target_id_file}，将无法加载任何嵌入！")
+#         print(f"❌ Error: {target_id_file} not found; no embeddings can be loaded!")
 #         return valid_ids
 #
 #     with open(target_id_file, 'r', encoding='utf-8') as f:
 #         for line in f:
 #             line = line.strip()
 #             if not line: continue
-#             # 假设第一列是 ID (兼容 tab 或空格分隔)
+#             # Assume the first column is the ID (support tabs or spaces)
 #             parts = line.split()
 #             if parts:
 #                 valid_ids.add(parts[0])
 #
-#     print(f"✅ 目标 ID 加载完成，共有 {len(valid_ids)} 个唯一 ID 需要加载。")
+#     print(f"✅ Target IDs loaded: {len(valid_ids)} unique IDs require loading.")
 #     return valid_ids
 #
-# # ===== 3. [修改] 按需加载 Embeddings =====
+# # ===== 3. [Modified] Load embeddings on demand =====
 # def preload_embeddings(valid_ids):
-#     print(f"🚀 开始根据 ID 列表加载 Embeddings...")
+#     print(f"🚀 Loading embeddings based on the ID list...")
 #
 #     if not valid_ids:
-#         print("⚠️ 警告: 目标 ID 列表为空，将不会加载任何嵌入！")
+#         print("⚠️ Warning: The target ID list is empty; no embeddings will be loaded!")
 #         return
 #
 #     total_loaded = 0
 #
 #     for d in embed_dir:
 #         if not os.path.exists(d):
-#             print(f"⚠️ 警告: 路径不存在 {d}，跳过")
+#             print(f"⚠️ Warning: Path does not exist: {d}; skipping")
 #             continue
 #
-#         # 获取文件夹下所有 .pt 文件
+#         # Get all .pt files in the directory
 #         files = [f for f in os.listdir(d) if f.endswith(".pt")]
-#         print(f"📂 正在扫描文件夹 {d} (共 {len(files)} 个文件)...")
+#         print(f"📂 Scanning directory {d} ({len(files)} files)...")
 #
-#         # 使用 tqdm 显示进度
+#         # Display progress with tqdm
 #         for f in tqdm(files, desc="Filtering & Loading", leave=False):
-#             node_id = os.path.splitext(f)[0] # 去掉 .pt 后缀
+#             node_id = os.path.splitext(f)[0] # Remove the .pt suffix
 #
-#             # --- 核心修改：过滤逻辑 ---
-#             # 只有当这个文件的文件名在我们的 valid_ids 列表里时，才加载
+#             # --- Core change: Filtering logic ---
+#             # Load the file only when its filename is in valid_ids
 #             if node_id not in valid_ids:
 #                 continue
 #             # -----------------------
 #
-#             # 避免重复加载
+#             # Avoid duplicate loads
 #             if node_id in embed_cache:
 #                 continue
 #
@@ -341,11 +341,11 @@ if __name__ == "__main__":
 #                 total_loaded += 1
 #             except: pass
 #
-#     print(f"✅ 嵌入加载完成！内存中实际加载了 {len(embed_cache)} 个向量 (命中率: {len(embed_cache)}/{len(valid_ids)})。")
+#     print(f"✅ Embedding loading complete! Loaded {len(embed_cache)} vectors into memory (hit rate: {len(embed_cache)}/{len(valid_ids)}).")
 #
-# # ===== 4. 加载映射表 (保持不变) =====
+# # ===== 4. Load the mapping table (unchanged) =====
 # def load_mapping():
-#     print(f"⏳ [2/4] 正在加载映射表 {mapping_file} ...")
+#     print(f"⏳ [2/4] Loading mapping table {mapping_file} ...")
 #     try:
 #         with open(mapping_file, 'r') as f:
 #             for line in f:
@@ -356,9 +356,9 @@ if __name__ == "__main__":
 #                 if string_id in ["NA", "N/A", "-", "nan", "None"]: continue
 #                 string_to_pdbs[string_id].append(pdb_id)
 #     except Exception as e:
-#         print(f"❌ 映射表读取失败: {e}")
+#         print(f"❌ Failed to read the mapping table: {e}")
 #
-# # ===== 5. 核心 ID 转换逻辑 (保持不变) =====
+# # ===== 5. Core ID-conversion logic (unchanged) =====
 # def get_best_node_id(raw_id, current_center_pdb):
 #     if raw_id in string_to_pdbs:
 #         candidates = string_to_pdbs[raw_id]
@@ -369,7 +369,7 @@ if __name__ == "__main__":
 #                 return pdb
 #     return raw_id
 #
-# # ===== 6. 构图逻辑 (保持不变) =====
+# # ===== 6. Graph-construction logic (unchanged) =====
 # def build_ppi_graph(ppi_file):
 #     filename = os.path.basename(ppi_file)
 #     center_pdb_id = os.path.splitext(filename)[0]
@@ -378,7 +378,7 @@ if __name__ == "__main__":
 #         sep = "\t" if not ppi_file.endswith(".csv") else ","
 #         df = pd.read_csv(ppi_file, sep=sep)
 #     except Exception as e:
-#         print(f"❌ [读取失败] {filename}: {e}")
+#         print(f"❌ [Read failed] {filename}: {e}")
 #         return None
 #
 #     rename_map = {"protein1": "PDB_A", "protein2": "PDB_B", "score": "score", "combined_score": "score"}
@@ -448,19 +448,19 @@ if __name__ == "__main__":
 #     g.ndata["x"] = torch.stack(feats)
 #     return g
 #
-# # ===== 7. 主程序 =====
+# # ===== 7. Main program =====
 # if __name__ == "__main__":
-#     # 1. 先加载 ID 列表
+#     # 1. Load the ID list first
 #     target_ids = load_target_ids()
 #
-#     # 2. 将 ID 列表传给加载函数
+#     # 2. Pass the ID list to the loading function
 #     preload_embeddings(target_ids)
 #
-#     # 3. 继续后续流程
+#     # 3. Continue with the remaining workflow
 #     load_mapping()
 #
 #     files = [f for f in os.listdir(ppi_dir) if f.endswith((".txt", ".tsv"))]
-#     print(f"🚀 [3/4] 开始构建 {len(files)} 个图...")
+#     print(f"🚀 [3/4] Starting construction of {len(files)} graphs...")
 #
 #     success = 0
 #     for f in tqdm(files):
@@ -472,4 +472,4 @@ if __name__ == "__main__":
 #                 success += 1
 #             except: pass
 #
-#     print(f"🎉 [4/4] 全部完成！成功: {success}")
+#     print(f"🎉 [4/4] All done! Successful: {success}")

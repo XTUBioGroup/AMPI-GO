@@ -4,17 +4,17 @@ import torch
 import dgl
 from tqdm import tqdm
 
-# 固定 DGL 后端
+# Pin the DGL backend
 os.environ["DGLBACKEND"] = "pytorch"
-os.environ["DGL_GRAPHBOLT_LOAD"] = "0"   # 禁用 GraphBolt
+os.environ["DGL_GRAPHBOLT_LOAD"] = "0"   # Disable GraphBolt
 
 def build_structure_graph(prot_id, ca_dist_matrix, residue_feat, threshold=10.0):
     """
-    构建一个 DGL 图
-    - prot_id: 蛋白质 ID
+    Build a DGL graph.
+    - prot_id: Protein ID
     - ca_dist_matrix: numpy array, shape [L, L]
     - residue_feat: numpy array, shape [F, d]
-    - threshold: 距离阈值，小于该值就连边
+    - threshold: Distance threshold; connect nodes below this value
     """
     L = ca_dist_matrix.shape[0]
     F = residue_feat.shape[0]
@@ -33,14 +33,14 @@ def build_structure_graph(prot_id, ca_dist_matrix, residue_feat, threshold=10.0)
 
     g = dgl.graph((u, v), num_nodes=L)
     g = dgl.add_self_loop(g)
-    g.edata['dis'] = torch.tensor(dis + [0.0] * L, dtype=torch.float32)  # 给自环赋 0 距离
+    g.edata['dis'] = torch.tensor(dis + [0.0] * L, dtype=torch.float32)  # Assign distance 0 to self-loops
     g.ndata['feat'] = torch.tensor(residue_feat, dtype=torch.float32)
 
     return g
 
 
 # ----------------------
-# 主流程
+# Main workflow
 # ----------------------
 ca_dir = "ca_matrices_train"
 feat_dir = "protT5_embeddings_train"
@@ -62,31 +62,31 @@ with open(protein_list_file, "r") as f, open(invalid_protein_file, "a") as inval
         out_path = os.path.join(graph_dir, f"{prot_id}.bin")
 
         # ------------------------------
-        # ⭐ 如果文件已经存在 → 直接跳过
+        # ⭐ Skip directly if the file already exists
         # ------------------------------
         if os.path.exists(out_path):
-            # print(f"[SKIP] {prot_id} 已存在 .bin 文件，跳过构图")
+            # print(f"[SKIP] {prot_id} already has a .bin file; skipping graph construction")
             continue
 
         # ------------------------------
-        # 检查 CA 和 ProtT5 文件是否存在
+        # Check whether the CA and ProtT5 files exist
         # ------------------------------
         ca_path = os.path.join(ca_dir, f"{prot_id}_ca.npy")
         feat_path = os.path.join(feat_dir, f"{prot_id}.pt")
 
         if not os.path.exists(ca_path) or not os.path.exists(feat_path):
-            print(f"[MISSING] {prot_id}: 缺少 CA 或 T5，跳过。")
+            print(f"[MISSING] {prot_id}: CA or T5 data is missing; skipping.")
             invalid_f.write(f"{prot_id}\n")
             continue
 
         # ------------------------------
-        # 加载 CA 矩阵与特征
+        # Load the CA matrix and features
         # ------------------------------
         ca_dist_matrix = np.load(ca_path)
         residue_feat = torch.load(feat_path).numpy()
 
         # ------------------------------
-        # 构建 DGL 图
+        # Build the DGL graph
         # ------------------------------
         g = build_structure_graph(
             prot_id,
@@ -96,15 +96,15 @@ with open(protein_list_file, "r") as f, open(invalid_protein_file, "a") as inval
         )
 
         if g is None:
-            print(f"[INVALID] {prot_id}: 构图失败，跳过。")
+            print(f"[INVALID] {prot_id}: Graph construction failed; skipping.")
             invalid_f.write(f"{prot_id}\n")
             continue
 
         # ------------------------------
-        # 保存图
+        # Save the graph
         # ------------------------------
         dgl.save_graphs(out_path, [g])
         graphs.append(g)
 
-print(f"构建完成: 共生成 {len(graphs)} 个新图，已保存到 {graph_dir}/")
-print(f"无效/缺失蛋白记录文件: {invalid_protein_file}")
+print(f"Build complete: Generated {len(graphs)} new graphs and saved them to {graph_dir}/")
+print(f"Invalid/missing protein log: {invalid_protein_file}")

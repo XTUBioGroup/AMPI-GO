@@ -7,7 +7,7 @@
 # import os
 
 
-# # ======= 读取 PID 列表 =======
+# # ======= Read the PID list =======
 # def load_pid_from_seq_file(path):
 #     pid_list = []
 #     with open(path, "r") as f:
@@ -18,7 +18,7 @@
 
 
 
-# # ======= 按 PID 顺序构造 InterPro CSR 矩阵 =======
+# # ======= Build the InterPro CSR matrix in PID order =======
 # def get_interpro_matrix(pid_list, protein_info, domain_map, save_file):
 #     rows, cols, data = [], [], []
 
@@ -44,9 +44,9 @@
 
 
 
-# # ======= 这是你要修改的核心函数 =======
+# # ======= Core function to modify =======
 # def build_interpro_features_only_ipr(
-#     pid_list,                # ← 改：从 train_pid_list 传入
+#     pid_list,                # ← Change: Pass from train_pid_list
 #     interpro_folder,
 #     save_feature='interpro_feature.pkl',
 #     save_map='domain_map.pkl'
@@ -58,11 +58,11 @@
 
 #     print(f"📂 Building InterPro feature by given PID list ({len(pid_list)} proteins)")
 
-#     # 🚀 关键修改：严格按 pid_list 顺序读取对应文件
+#     # 🚀 Key change: Read the corresponding files strictly in pid_list order
 #     for pid in tqdm(pid_list, desc="Reading InterProScan TSV"):
 #         file = interpro_folder / f"{pid}.tsv"
 
-#         # 文件不存在或为空 → 空 domain 列表
+#         # Missing or empty file -> empty domain list
 #         if (not file.exists()) or os.path.getsize(file) == 0:
 #             protein_info[pid] = []
 #             continue
@@ -73,12 +73,12 @@
 #             protein_info[pid] = []
 #             continue
 
-#         # InterPro ID 一般在列 11
+#         # InterPro IDs are usually in column 11
 #         if 11 not in df.columns:
 #             protein_info[pid] = []
 #             continue
 
-#         # 只保留 IPRxxxxx
+#         # Keep only IPRxxxxx entries
 #         ipr_list = [
 #             x for x in df[11].dropna().unique()
 #             if isinstance(x, str) and x.startswith("IPR")
@@ -87,26 +87,26 @@
 #         protein_info[pid] = ipr_list
 #         domain_set.update(ipr_list)
 
-#     # ===== 构建 domain_map（必须只用训练集） =====
+#     # ===== Build domain_map (training set only) =====
 #     domain_map = {ipr: i for i, ipr in enumerate(sorted(domain_set))}
 #     pkl.dump(domain_map, open(save_map, 'wb'))
 #     print(f"✅ Saved domain map → {save_map}  ({len(domain_map)} InterPro IDs)")
 
-#     # ===== 构建 InterPro 矩阵 =====
+#     # ===== Build the InterPro matrix =====
 #     get_interpro_matrix(pid_list, protein_info, domain_map, save_feature)
 
-#     # 保存 PID 顺序（可用于 debug）
+#     # Save PID order (useful for debugging)
 #     pkl.dump(pid_list, open(Path(save_feature).with_suffix(".pids.pkl"), 'wb'))
 #     print(f"📌 Saved PID order → {Path(save_feature).with_suffix('.pids.pkl')}")
 
 
 # def build_interpro_valid(pid_list, interpro_folder, domain_map_path, save_feature):
 #     """
-#     验证集 InterPro 构建，复用训练集 domain_map
+#     Build validation-set InterPro features using the training-set domain_map.
 #     """
 #     interpro_folder = Path(interpro_folder)
 
-#     # 加载训练集 domain_map（不能重新构建，否则维度不一致）
+#     # Load the training-set domain_map (do not rebuild it, or dimensions will differ)
 #     domain_map = pkl.load(open(domain_map_path, "rb"))
 #     domain_dim = len(domain_map)
 
@@ -117,7 +117,7 @@
 #     for i, pid in enumerate(tqdm(pid_list, desc="Reading valid InterPro")):
 #         file = interpro_folder / f"{pid}.tsv"
 
-#         # 空文件 → 全 0
+#         # Empty file -> all zeros
 #         if (not file.exists()) or os.path.getsize(file) == 0:
 #             continue
 
@@ -129,14 +129,14 @@
 #         if 11 not in df.columns:
 #             continue
 
-#         # 扫描每个 IPR
+#         # Scan each IPR
 #         for x in df[11].dropna().unique():
 #             if isinstance(x, str) and x in domain_map:
 #                 rows.append(i)
 #                 cols.append(domain_map[x])
 #                 data.append(1)
 
-#     # 构建 CSR（shape 固定 = 验证集蛋白数量 × 训练集 domain_map 维度）
+#     # Build CSR (fixed shape = validation protein count x training domain_map dimension)
 #     mat = csr_matrix(
 #         (data, (rows, cols)),
 #         shape=(len(pid_list), domain_dim)
@@ -148,22 +148,22 @@
 #     return mat
 
 
-# # ======= main（训练集用） =======
+# # ======= main (for the training set) =======
 # if __name__ == "__main__":
-#     # 你的训练集 PID 列表文件（两列：PDB_CHAIN + sequence）
+#     # Training PID list file (two columns: PDB_CHAIN + sequence)
 #     train_pid_file = "protein_id_and_sequence_train.txt"
 
-#     # InterProScan 的结果目录
+#     # InterProScan results directory
 #     folder = "interpro_train"
 
-#     # 输出文件
+#     # Output files
 #     save_feature = "interpro_feature_train.pkl"
 #     save_map = "domain_map_train.pkl"
 
-#     # 1) 先读取 PID 顺序（至关重要）
+#     # 1) Read PID order first (critical)
 #     pid_list = load_pid_from_seq_file(train_pid_file)
 
-#     # 2) 再按顺序构建 InterPro 特征
+#     # 2) Build InterPro features in that order
 #     build_interpro_features_only_ipr(
 #         pid_list,
 #         interpro_folder=folder,
@@ -175,8 +175,8 @@
 
 #     # build_interpro_valid(
 #     #     pid_list=valid_pid_list,
-#     #     interpro_folder="interpro_valid",         # 你的验证集 .tsv 存放位置
-#     #     domain_map_path="domain_map_train.pkl",   # 复用训练 map
+#     #     interpro_folder="interpro_valid",         # Directory containing validation .tsv files
+#     #     domain_map_path="domain_map_train.pkl",   # Reuse the training map
 #     #     save_feature="interpro_feature_valid.pkl"
 #     # )
 
@@ -190,17 +190,17 @@ import numpy as np
 from pathlib import Path
 import os
 
-# ======= 读取 PID 列表 =======
+# ======= Read the PID list =======
 def load_pid_from_seq_file(path):
     pid_list = []
     with open(path, "r") as f:
         for line in f:
             if line.strip():
-                # 无论是 "ID 序列" 格式，还是纯 "ID" 格式，split()[0] 都能精准拿到 ID
+                # split()[0] extracts the ID from either "ID sequence" format or a plain "ID" format
                 pid_list.append(line.split()[0])
     return pid_list
 
-# ======= 按 PID 顺序构造 InterPro CSR 矩阵 =======
+# ======= Build the InterPro CSR matrix in PID order =======
 def get_interpro_matrix(pid_list, protein_info, domain_map, save_file):
     rows, cols, data = [], [], []
 
@@ -223,7 +223,7 @@ def get_interpro_matrix(pid_list, protein_info, domain_map, save_file):
 
     return mat
 
-# ======= 训练集构建（生成并保存 domain_map） =======
+# ======= Build the training set (generate and save domain_map) =======
 def build_interpro_features_only_ipr(
     pid_list,
     interpro_folder,
@@ -265,7 +265,7 @@ def build_interpro_features_only_ipr(
 
     get_interpro_matrix(pid_list, protein_info, domain_map, save_feature)
 
-# ======= 验证/测试集构建（严格复用 domain_map） =======
+# ======= Build validation/test sets (strictly reuse domain_map) =======
 def build_interpro_valid(pid_list, interpro_folder, domain_map_path, save_feature):
     interpro_folder = Path(interpro_folder)
     domain_map = pkl.load(open(domain_map_path, "rb"))
@@ -303,27 +303,27 @@ def build_interpro_valid(pid_list, interpro_folder, domain_map_path, save_featur
     return mat
 
 # ==========================================
-# ======= 自动化批处理主程序 =======
+# ======= Automated batch-processing main program =======
 # ==========================================
 if __name__ == "__main__":
-    # 路径配置区 (请确保与服务器实际路径一致)
-    # 你之前生成的 9 个拆分列表文件夹
+    # Path configuration (ensure paths match the server)
+    # Directory containing the nine split lists generated previously
     SPLIT_DIR = Path("data_spilt_big")
-    # 你存放所有 tsv 文件的总文件夹
+    # Root directory containing all TSV files
     INTERPRO_DIR = Path("interpro_big")
-    # 生成的特征矩阵存放位置
+    # Output directory for generated feature matrices
     OUT_DIR = Path("interpro_features_big")
     
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     
     ontologies = ['bp', 'mf', 'cc']
 
-    print("🚀 开始批量构建 InterPro 特征矩阵...")
+    print("🚀 Starting batch construction of InterPro feature matrices...")
 
     for ont in ontologies:
         print(f"\n{'='*40}\n🌟 Processing Ontology: {ont.upper()}\n{'='*40}")
         
-        # 定义文件路径
+        # Define file paths
         train_txt = SPLIT_DIR / f"{ont}_train_ids.txt"
         test1_txt = SPLIT_DIR / f"{ont}_valid_ids.txt"
         test2_txt = SPLIT_DIR / f"{ont}_test_ids.txt"
@@ -333,7 +333,7 @@ if __name__ == "__main__":
         test2_feat = OUT_DIR / f"{ont}_test_interpro.pkl"
         domain_map_file = OUT_DIR / f"{ont}_domain_map.pkl"
 
-        # ---------------- 1. 处理 Train (生成 Map) ----------------
+        # ---------------- 1. Process Train (generate map) ----------------
         if train_txt.exists():
             print(f"\n🛠️ 1. Building Train Matrix for {ont.upper()}...")
             train_pids = load_pid_from_seq_file(train_txt)
@@ -347,7 +347,7 @@ if __name__ == "__main__":
             print(f"❌ Missing {train_txt.name}, skipping {ont.upper()}...")
             continue
 
-        # ---------------- 2. 处理 Test1 (复用 Map) ----------------
+        # ---------------- 2. Process Test1 (reuse map) ----------------
         if test1_txt.exists():
             print(f"\n🛠️ 2. Building Test1 Matrix for {ont.upper()}...")
             test1_pids = load_pid_from_seq_file(test1_txt)
@@ -358,7 +358,7 @@ if __name__ == "__main__":
                 save_feature=test1_feat
             )
 
-        # ---------------- 3. 处理 Test2 (复用 Map) ----------------
+        # ---------------- 3. Process Test2 (reuse map) ----------------
         if test2_txt.exists():
             print(f"\n🛠️ 3. Building Test2 Matrix for {ont.upper()}...")
             test2_pids = load_pid_from_seq_file(test2_txt)
@@ -369,4 +369,4 @@ if __name__ == "__main__":
                 save_feature=test2_feat
             )
 
-    print("\n🎉 全部特征矩阵构建完毕！")
+    print("\n🎉 All feature matrices have been built!")
